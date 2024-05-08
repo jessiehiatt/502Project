@@ -1,0 +1,101 @@
+# Point Pattern Analysis
+
+Following code contains several methods for evaluating the spatial distribution of a discrete point pattern, in this case coal mines within the Uinta coal region in western Colorado. Kernel density estimations, the quadrant counts of the coal mine point pattern was mapped. The Hopkins-Skellam and Clak Evans tests statisitcs measure the ranomness in the points and test for clustering.
+
+## Import Libraries and Read Files
+
+```{r}
+library(sf)
+library(spatstat)
+boundary <- st_read('C:/CMF_Project/502ProjectData/uinta_buff_1500ft.shp')
+shapefile <- st_read("C:/CMF_Project/502ProjectData/coal_mines_Uinta.shp")
+```
+
+## Plot Data
+
+```{r}
+coordinates <- st_coordinates(shapefile)
+par(mfrow = c(1, 1), mar = c(0.1, 0.1, 0.1, 0.1) + 0.1, cex = 0.6)  # Adjust cex as needed
+mines <- ppp(coordinates[,1], coordinates[,2], window=as.owin(boundary), check=TRUE)
+print(plot(mines, pch = 19))
+```
+
+## **Clark Evans Statistic**
+
+```{r Clark Evans}
+clarkevans.test(mines, clipregion = as.owin(boundary), alternative="clustered")
+```
+
+```{r Clark Evans}
+clarkevans.test(mines, clipregion = as.owin(boundary))
+clarkevans.test(mines, clipregion = as.owin(boundary), alternative="clustered")
+clarkevans.test(mines, clipregion = as.owin(boundary), correction="cdf", nsim=99)
+```
+
+## Hopskel
+
+```{r}
+hopskel(mines)
+hopskel.test(mines, alternative="clustered")
+```
+
+## Intensity
+
+Source: <https://www.paulamoraga.com/book-spatial/intensity-estimation.html>
+
+The [`density()`](https://rdrr.io/pkg/terra/man/density.html) function of **spatstat** can be used to obtain a kernel estimate of the intensity of a point pattern. These include the type of kernel (`kernel`) and the smoothing bandwidth (`sigma`). By default, [`density()`](https://rdrr.io/pkg/terra/man/density.html) uses a Gaussian kernel and a bandwidth determined by a simple rule of thumb that depends only on the size of the window. Here, we use the [`density()`](https://rdrr.io/pkg/terra/man/density.html) function to estimate the intensity of the point pattern of tree locations that is in the `japanesepines` data from **spatstat**
+
+```{r}
+lambdahat <- density(mines)
+attr(lambdahat, "sigma")
+
+plot(lambdahat, main = "Default bandwidth")
+plot(density(mines, sigma = 1000))
+plot(density(mines, sigma = 5000))
+plot(density(mines, sigma = 15000))
+```
+
+## Quadrant Test
+
+\<<https://www.rdocumentation.org/packages/spatstat/versions/1.64-1/topics/quadrat.test>
+
+```{r}
+par(mfrow = c(1, 1), mar = c(0.1, 0.1, 0.1, 0.1) + 0.1, cex = 0.6)  # Adjust cex as needed
+
+color_scheme <- colorRampPalette(c("blue", "red"))
+# Perform your plot
+Q <- quadratcount(mines, nx = 10, ny = 10)
+plot(mines, pch=10, cols="grey70", main=NULL)
+plot(Q, pch="-")
+plot(Q, col="red", cex=1.2)
+plot(Q, lty = 1, col = color_scheme(7))
+
+# Reset graphical parameters
+#par(mfrow = c(1, 1), mar = c(5, 4, 4, 2) + 0.1, cex = 1)
+```
+
+```{r}
+par(mfrow = c(1, 1), mar = c(0.1, 0.1, 0.1, 0.1) + 0.1, cex = 0.6)  # Adjust cex as needed
+
+mines.km <- rescale(mines, 1000, "km")
+Qkm <- quadratcount(mines.km, nx = 10, ny = 10)
+
+# Plot the density
+
+plot(intensity(Qkm, image=TRUE), main=NULL, las=1, interpolate = TRUE)
+#plot(Qkm, add=TRUE)
+# Plot density raster
+#plot(mines.km, pch=20, cex=0.6, col=rgb(0,0,0,.5), add=TRUE)  # Add points
+```
+
+To test $H_0$: CSR or regular vs. $H_1$: clustered, we use alternative = "clustered". If the pattern is clustered, the observed $X^2$ statistic will be large, and the p-value is calculated as the area to the right of the observed $X^2$
+
+```{r}
+quadrat.test(Q, alternative = "clustered")
+```
+
+Finally, we test $H_0$: CSR vs. $H_1$: no CSR (regular or clustered) using the default value alternative = "two.sided". If the pattern is regular or clustered, the observed $X^2$ statistic will be near 0 or large. The p-value is calculated as 2 times the minimum of the area to the left of the observed $X^2$ and the area to the right of the observed
+
+```{r}
+quadrat.test(Q, alternative = "two.sided") # default
+```
