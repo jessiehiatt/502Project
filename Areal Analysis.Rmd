@@ -1,3 +1,10 @@
+---
+title: "R Notebook"
+output:
+  html_document:
+    df_print: paged
+---
+
 # Load Libraries
 
 ```{r include=FALSE}
@@ -23,7 +30,7 @@ library(flextable)
 Read file
 
 ```{r}
-mesh <- st_read("C:/CMF_Project/502ProjectData/Grid_120m_Hogback_att.shp")
+mesh <- st_read("~/GitHub/502Project/Data/Grid_120m_Hogback_att.shp")
 print(summary(mesh), width = 80)
 ```
 
