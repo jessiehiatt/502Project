@@ -1,3 +1,7 @@
+---
+---
+---
+
 # Point Pattern Analysis
 
 Following code contains several methods for evaluating the spatial distribution of a discrete point pattern, in this case coal mines within the Uinta coal region in western Colorado. Kernel density estimations, the quadrant counts of the coal mine point pattern was mapped. The Hopkins-Skellam and Clak Evans tests statisitcs measure the ranomness in the points and test for clustering.
@@ -10,7 +14,7 @@ library(spatstat)
 ```
 
 ```{r}
-boundary <- st_read('C:/CMF_Project/502ProjectData/uinta_buff_1500ft.shp')
+boundary <- st_read('~/GitHub/502Project/Data/uinta_buff_1500ft.shp')
 shapefile <- st_read("~/GitHub/502Project/Data/coal_mines_Uinta.shp")
 ```
 
