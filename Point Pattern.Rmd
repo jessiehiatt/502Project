@@ -1,12 +1,14 @@
 ---
 title: "Point Pattern Analysis"
-output: html_document
+output:
+  html_document:
+    df_print: paged
 date: "2024-05-09"
 ---
 
 # Point Pattern Analysis
 
-Following code contains several methods for evaluating the spatial distribution of a discrete point pattern, in this case coal mines within the Uinta coal region in western Colorado. Kernel density estimations, the quadrant counts of the coal mine point pattern was mapped. The Hopkins-Skellam and Clak Evans tests statisitcs measure the ranomness in the points and test for clustering.
+Following code contains several methods for evaluating the spatial distribution of a discrete point pattern, in this case coal mines within the Uinta coal region in western Colorado. Kernel density estimations, the quadrant counts of the coal mine point pattern was mapped. The Hopkins-Skellam and Clak Evans tests statisitcs measure the randomness in the points and test for clustering.
 
 ## Import Libraries and Read Files
 
