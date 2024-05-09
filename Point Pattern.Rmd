@@ -1,5 +1,7 @@
 ---
----
+title: "Point Pattern Analysis"
+output: html_document
+date: "2024-05-09"
 ---
 
 # Point Pattern Analysis
@@ -29,11 +31,11 @@ print(plot(mines, pch = 19))
 
 ## **Clark Evans Statistic**
 
-```{r Clark Evans}
+```{r}
 clarkevans.test(mines, clipregion = as.owin(boundary), alternative="clustered")
 ```
 
-```{r Clark Evans}
+```{r}
 clarkevans.test(mines, clipregion = as.owin(boundary))
 clarkevans.test(mines, clipregion = as.owin(boundary), alternative="clustered")
 clarkevans.test(mines, clipregion = as.owin(boundary), correction="cdf", nsim=99)
