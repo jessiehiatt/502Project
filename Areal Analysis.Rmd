@@ -1,0 +1,649 @@
+# Load Libraries
+
+```{r include=FALSE}
+library(sf)
+library(spatstat)
+library(ggplot2)
+library(cartogram) # Create Cartograms with R
+library(spdep)
+library(dplyr)
+library(spData)
+library(tmap)
+library(mapview)
+library(spatialreg)
+library(corrr)
+library(gridExtra) # Miscellaneous Functions for "Grid" Graphics
+library(plotly) # Create Interactive Web Graphics via 'plotly.js'
+library(tidyverse) 
+library(flextable)
+```
+
+# Preliminaries
+
+Read file
+
+```{r}
+mesh <- st_read("C:/CMF_Project/502ProjectData/Grid_120m_Hogback_att.shp")
+print(summary(mesh), width = 80)
+```
+
+## Visualizations
+
+```{r}
+ggplot(mesh) + 
+  geom_sf(aes(fill = cut_number(Elevation, 6)), color = NA, size = 0.1) +
+  scale_fill_manual(values = terrain.colors(6)) +
+  coord_sf() +
+  labs(fill = "Elevation (meters)")+
+  ggtitle("Elevation Map")
+```
+
+```{r}
+ggplot(mesh) + 
+  geom_sf(aes(fill = cut_number(Slope, 6)), color = NA, size = 0.1) +
+  scale_fill_brewer(palette = rev("YlOrRd")) +
+  coord_sf() +
+  labs(fill = "Slope (%)")+
+  ggtitle("Slope % Map")
+```
+
+```{r}
+ggplot(mesh) + 
+  geom_sf(aes(fill = cut_number(Curvature, 6)), color = NA, size = 0.1) +
+  scale_fill_brewer(palette = "RdYlGn") +
+  coord_sf() +
+  labs(fill = "Curvature")+
+  ggtitle("Curvature Map")
+```
+
+```{r}
+ggplot(mesh) + 
+  geom_sf(aes(fill = cut_number(Roughness, 5)), color = NA, size = 0.1) +
+  scale_fill_brewer(palette = "YlOrRd") +
+  coord_sf() +
+  labs(fill = "Roughness")+
+  ggtitle("Surface Roughness Map")
+```
+
+```{r}
+ggplot(mesh) + 
+  geom_sf(aes(fill = cut_number(StructDen, 5)), color = NA, size = 0.1) +
+  scale_fill_brewer(palette = "YlOrRd") +
+  coord_sf() +
+  labs(fill = "Structure Kernel Density")+
+  ggtitle("Structural Kernel Density")
+```
+
+# **Proximity - Creating Spatial Weights Matrices**
+
+## Contiguity - Queen
+
+The first step to create a spatial weights matrix is to find the neighbors (i.e., areas adjacent to) for each area. The function poly2nb is used for this (note that the default adjacency criterion is queen):
+
+```{r}
+# The function `poly2nb()` takes an object of class "Spatial" with polygons, and finds the neighbors
+
+mesh.queen <- poly2nb(pl = mesh, queen = TRUE)
+summary(mesh.queen)
+```
+
+```{r}
+mesh.wq <- nb2listw(mesh.queen)
+```
+
+```{r include=FALSE}
+mesh_centroids <- mesh |> st_centroid() |> st_coordinates()
+```
+
+```{r}
+# Reduce plot border width
+par(mfrow = c(1, 1), mar = c(0.1, 0.1, 0.1, 0.1) + 0.1, cex = 0.1)  
+
+# Plot the geometry of the zoning system
+plot(mesh |> st_geometry(), border = NA)
+
+# Plot the neighbhorhood relationships; this uses two arguments: the `nb` class object and the coordinates of the centroids of the zoning system
+plot(mesh.queen, mesh_centroids, add = TRUE, col = "red")
+```
+
+## K-nearest neighbors
+
+Sourced in part: <https://paezha.github.io/spatial-analysis-r/area-data-ii.html#other-criteria-for-coding-proximity>
+
+A potential disadvantage of using a distance-based criterion is that for zoning systems with areas of vastly different sizes, small areas will end up having many neighbors, whereas large areas will have few or none.
+
+The criterion of k-nearest neighbors allows for some adaptation to the size of the areas. Under this criterion, all zones have the exact same number of neighbors, but the geographical extent of the neighborhood may (and likely will) change.
+
+In R, 𝑘-nearest neighbors can be obtained by means of the function `knearneigh()`, and the arguments include the value of 𝑘:
+
+```{r}
+mesh.knn <- knn2nb(knearneigh(mesh_centroids, k = 4))
+```
+
+```{r}
+par(mfrow = c(1, 1), mar = c(0.01, 0.01, 0.01, 0.01) + 0.1, cex = 0.01)
+plot(mesh |> st_geometry(), border = NA) 
+
+plot(mesh.knn, mesh_centroids, col = "red", add = TRUE)
+```
+
+# Spatial Moving Averages
+
+The spatial weights matrix 𝑊, and in particular its row-standardized version 𝑊𝑠𝑡, is useful to calculate a spatial statistic, the *spatial moving average*.
+
+The spatial moving average is a variation of the mean value of the attribute of interest varying across the study region: in fact, it is a weighted average, calculated using the spatial weights. Recall that the mean is calculated as the sum of all relevant values divided by the number of values summed.
+
+Spatial moving averages can be calculated in a straightforward way by means of the function `lag.listw()` function of the `spdep` package. This function uses a spatial weights matrix and automatically selects the row-standardized weights.
+
+Sources
+
+-   <https://paezha.github.io/spatial-analysis-r/area-data-ii.html#spatial-moving-averages>
+
+-   <https://paezha.github.io/spatial-analysis-r/area-data-iii.html#spatial-moving-averages-and-simulation>
+
+## Contiguity Queen
+
+### Surface Roughness Spatial Moving Average
+
+```{r}
+roughness.sma <- lag.listw(x = mesh.wq, mesh$Roughness)
+```
+
+Join the new variable to the `mesh` data frame object with the area grids using the unique ID identifier.
+
+```{r}
+mesh <- left_join(mesh, data.frame(Id = mesh$Id, roughness.sma), by = "Id")
+print(summary(mesh), width = 80)
+```
+
+```{r}
+# Map the spatial moving average of surface roughness using quintiles
+map.sma <- ggplot(mesh) +
+  geom_sf(aes(fill = cut_number(roughness.sma, 5),
+              roughness.sma = round(roughness.sma),
+              Id = Id),
+          color = NA) + 
+# Embellish the map with a color palette labels
+  scale_fill_brewer(palette = "YlOrBr") +
+  labs(fill = "Surface Roughness SMA") +
+  coord_sf()+
+  ggtitle("Surface Roughness Spatial Moving Average")
+
+
+# `ggplotly()` takes the `ggplot2` object and creates an interactive map
+ggplotly(map.sma, tooltip = c("Id", "roughness.sma"))
+```
+
+### Elevation Spatial Moving Average
+
+```{r}
+elevation.sma <- lag.listw(x = mesh.wq, mesh$Elevation)
+mesh <- left_join(mesh, data.frame(Id = mesh$Id, elevation.sma), by = "Id")
+print(summary(mesh), width = 80)
+```
+
+```{r}
+map.sma <- ggplot(mesh) +
+  geom_sf(aes(fill = cut_number(elevation.sma, 5),
+              elevation.sma = round(elevation.sma),
+              Id = Id),
+          color = NA) + 
+  scale_fill_brewer(palette = "YlOrBr") +
+  labs(fill = "Elevation (meters) SMA") +
+  coord_sf()+
+  ggtitle("Elevation Spatial Moving Average")
+
+ggplotly(map.sma, tooltip = c("Id", "elevation.sma"))
+```
+
+### Curvature Spatial Moving Average
+
+```{r}
+curvature.sma <- lag.listw(x = mesh.wq, mesh$Curvature)
+mesh <- left_join(mesh, data.frame(Id = mesh$Id, curvature.sma), by = "Id")
+print(summary(mesh), width = 80)
+```
+
+```{r}
+map.sma <- ggplot(mesh) +
+  geom_sf(aes(fill = cut_number(curvature.sma, 5),
+              curvature.sma = round(curvature.sma),
+              Id = Id),
+          color = NA) + 
+  scale_fill_brewer(palette = "YlOrBr") +
+  labs(fill = "Curvature SMA") +
+  coord_sf()+
+  ggtitle("Curvature Spatial Moving Average")
+
+ggplotly(map.sma, tooltip = c("Id", "curvature.sma"))
+```
+
+### Slope Spatial Moving Average
+
+```{r}
+slope.sma <- lag.listw(x = mesh.wq, mesh$Slope)
+mesh <- left_join(mesh, data.frame(Id = mesh$Id, slope.sma), by = "Id")
+print(summary(mesh), width = 80)
+```
+
+```{r}
+map.sma <- ggplot(mesh) +
+  geom_sf(aes(fill = cut_number(slope.sma, 5),
+              slope.sma = round(slope.sma),
+              Id = Id), color = NA) + 
+  scale_fill_brewer(palette = "YlOrBr") +
+    labs(fill = "Slope SMA") +
+  coord_sf()+
+  ggtitle("Slope Spatial Moving Average")
+
+ggplotly(map.sma, tooltip = c("Id", "slope.sma"))
+```
+
+# The Spatial Moving Average as a Smoother
+
+Source: <https://paezha.github.io/spatial-analysis-r/area-data-iii.html#the-spatial-moving-average-as-a-smoother>
+
+The spatial moving average, when mapped, is essentially a smoothing technique. What do we mean by smoothing? By reporting the average of the neighbors instead of the actually observed value of the variable, we reduce the amount of variability that is communicated. This often can make it easier to distinguish the overall pattern, at the cost of some information loss (think of how when mapping quadrants we lost some information/detail by calculating the intensity for areas).
+
+We can illustrate the use of the spatial moving average as a smoother with the help of a little simulation.
+
+To simulate a random spatial variable, we can randomize the observations that we already have, reassigning them at random to areas in the system, and calculate their spatial moving averages.
+
+```{r}
+# By sampling at random and without replacement from the original variable, we create a null landscape. We will call this `roughness_s1`, where the "s1" part is to indicate that this is our first simulated random landscape.
+
+roughness_s1 <- sample(mesh$Roughness)
+
+# We use the function `lag.listw()` to calculate the spatial moving average, but now for the null landscape we just simulated. 
+
+roughness_s1.sma <- lag.listw(mesh.wq, roughness_s1)
+
+# Additional attribute calculations
+curvature_s1 <- sample(mesh$Curvature)
+curvature_s1.sma <- lag.listw(mesh.wq, curvature_s1)
+
+slope_s1 <- sample(mesh$Slope)
+slope_s1.sma <- lag.listw(mesh.wq, slope_s1)
+
+elevation_s1 <- sample(mesh$Elevation)
+elevation_s1.sma <- lag.listw(mesh.wq, elevation_s1)
+
+structures_s1 <- sample(mesh$StructDen)
+structures_s1.sma <- lag.listw(mesh.wq, structures_s1)
+```
+
+Next, add the null simulated landscapes to the data frames, as well as their spatial moving averages. This is useful for mapping and plotting purposes:
+
+```{r}
+# Here we add the simulated landscapes to the `sf` dataframe.
+mesh$roughness_s1 <- roughness_s1
+mesh$curvature_s1 <- curvature_s1
+mesh$slope_s1 <- slope_s1
+mesh$elevation_s1 <- elevation_s1
+mesh$structures_s1 <- structures_s1
+
+# Here we add the spatial moving averages of the simulated landscapes to the `sf` dataframe.
+mesh$roughness_s1.sma <- roughness_s1.sma
+mesh$curvature_s1.sma <- curvature_s1.sma
+mesh$slope_s1.sma <- slope_s1.sma
+mesh$elevation_s1.sma <- elevation_s1.sma
+mesh$structures_s1.sma <- structures_s1.sma
+```
+
+### Simulation Comparison - Roughness
+
+It would be useful to compare the original roughness to the null landscapes created. To create a single figure with the simulated variables using the `facet_wrap()` function of `ggplot2`, we must first reorganize the data so that all the roughness variables are in a single column, and all spatial moving average variables are also in a single column. Further, we need a new column to identifies which variable the values in this column correspond to. We will solve this little data management problem by copying only the data we are interested in into a new dataframe (by means of `select()`), and then *pivoting* the spatial moving averages into a single column (i.e., a long table):
+
+```{r}
+# mesh2 is a new dataframe. 
+# Pipe operators (|>) are used to pass the original dataframe to the select() function, and then the output of that is passed to the `gather()` function. Notice the selection of the empirical spatial moving average and the 1 simulated instances of roughness. 
+
+# pivot_longer() places all variables with the exception of `geometry` in a single column named `ROUGHNESS_SMA` and creates a new variable called `VAR` with the names of the original columns (i.e., roughness.sma, roughness_s1.sma, etc.)
+
+mesh_r <- mesh |> 
+  # `select()` keeps only the spatial moving averages and geometry
+  select(roughness.sma, 
+         roughness_s1.sma,
+         geometry) |> # passes selection to `pivot_longer()`
+  pivot_longer(cols = -geometry,
+               names_to = "VAR",
+               values_to = "ROUGHNESS_SMA")
+
+# Map plot
+ggplot() + 
+  geom_sf(data = mesh_r, aes(fill = ROUGHNESS_SMA), color = NA) + 
+  facet_wrap(~VAR, ncol = 1) + # We are creating multiple plots for single data 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) + # Select color palette 
+  labs(fill = "Roughness SMA") +
+  theme(axis.text.x = element_blank(), 
+        axis.text.y = element_blank()) # Remove the axis labels
+```
+
+### Spatial Moving Average Scatterplots - Roughness
+
+First, extract the roughness information from the original `sf` object, reorganize, and bind to `mesh2` so that we can plot using faceting:
+
+```{r}
+mesh_r <- mesh_r |> # Pass `mesh2` as the first argument of `data.frame()`
+  data.frame(mesh |> # Pass `mesh` to `st_drop_geometry()`
+               st_drop_geometry() |> # Drop the geometry 
+               
+# Select from `mesh` the original roughness density and  null  simulated landscapes
+               select(Roughness,
+                      roughness_s1) |> # Pass  result to `pivot_longer()` 
+  
+               pivot_longer(cols = everything(),
+                            names_to = "VAR", 
+                            values_to = "ROUGHNESS") |> 
+  
+               select(ROUGHNESS)) # Drop VAR from the the dataframe
+```
+
+It is possible to fit a line to the scatterplots (i.e., adding a regression line). This makes it easier to appreciate the difference between the empirical and simulated variables.
+
+Add fitted lines to the scatterplots by means of the function `geom_smooth()`. The method “lm” means *linear model*, so the fitted line is a straight line:
+
+```{r}
+#Adding a geom and line (slope = 1)
+ggplot(data = mesh_r, aes(x = ROUGHNESS, y = ROUGHNESS_SMA, color = VAR)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  # Add a fitted line to the plots
+  geom_smooth(method = "lm", color='black') +
+  coord_equal() +
+  theme(aspect.ratio = 0.9, plot.title = element_text(size = 12), 
+        legend.position = "none") +
+  facet_wrap(~ VAR, ncol = 2) +
+  
+ggtitle("Roughness Spatial Moving Average Scatterplots with Linear Regression Fit")
+```
+
+You will notice that the slope of the line tends to be flat in the simulated variables; this is to be expected, since these variables are spatially random: *the values of the variable* are independent of the values of their local means! In other words, the probability that the map is random is pretty high.
+
+The empirical variable, on the other hand, has a slope that is much closer to the 45 degree line. This indicates that the values of the variable at 𝑖 are not independent of their local means: in other words, 𝑥~𝑖~ is correlated with 𝑥~𝑖~¯, and the probability of a non-random pattern is high. This phenomenon is called *spatial autocorrelation*, and it is a fundamental way to describe spatial data.
+
+### Simulation Comparison and Scatter plots - Slope
+
+```{r}
+mesh_s <- mesh |> 
+  # `select()` keeps only the spatial moving averages and geometry
+  select(slope.sma, 
+         slope_s1.sma,
+         geometry) |> # passes selection to `pivot_longer()`
+  pivot_longer(cols = -geometry,
+               names_to = "VAR",
+               values_to = "SLOPE_SMA")
+
+ggplot() + 
+  geom_sf(data = mesh_s, aes(fill = SLOPE_SMA), color = NA) + 
+  facet_wrap(~VAR, ncol = 1) + # We are creating multiple plots for single data 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) + # Select color palette 
+  labs(fill = "SLOPE SMA") +
+  theme(axis.text.x = element_blank(), 
+        axis.text.y = element_blank()) # Remove the axis labels
+```
+
+```{r}
+mesh_s <- mesh_s |> # Pass `mesh2` as the first argument of `data.frame()`
+  data.frame(mesh |> # Pass `mesh` to `st_drop_geometry()`
+               st_drop_geometry() |> # Drop the geometry 
+               
+# Select from `mesh` the original slope and  null  simulated landscapes
+               select(Slope,
+                      slope_s1) |> # Pass  result to `pivot_longer()` 
+  
+               pivot_longer(cols = everything(),
+                            names_to = "VAR", 
+                            values_to = "SLOPE") |> 
+  
+               select(SLOPE)) # Drop VAR from the the dataframe
+
+#Adding a geom and line (slope = 1)
+ggplot(data = mesh_s, aes(x = SLOPE, y = SLOPE_SMA, color = VAR)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  
+  # Add a fitted line to the plots
+  geom_smooth(method = "lm", color='black') +
+  coord_equal() +
+  theme(aspect.ratio = 0.9, plot.title = element_text(size = 12), 
+        legend.position = "none") +
+  facet_wrap(~ VAR, ncol = 2) +
+  
+ggtitle("Slope Spatial Moving Average Scatterplots with Linear Regression Fit")
+```
+
+### Simulation Comparison and Scatter plots - Elevation
+
+```{r}
+mesh_e <- mesh |> 
+  # `select()` keeps only the spatial moving averages and geometry
+  select(elevation.sma, 
+         elevation_s1.sma,
+         geometry) |> # passes selection to `pivot_longer()`
+  pivot_longer(cols = -geometry,
+               names_to = "VAR",
+               values_to = "ELEVATION_SMA")
+
+ggplot() + 
+  geom_sf(data = mesh_e, aes(fill = ELEVATION_SMA), color = NA) + 
+  facet_wrap(~VAR, ncol = 1) + # Creating multiple plots for single data 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) + # Select color 
+  labs(fill = "ELEVATION SMA") +
+  theme(axis.text.x = element_blank(), 
+        axis.text.y = element_blank()) # Remove the axis labels
+```
+
+```{r}
+mesh_e <- mesh_e |> # Pass `mesh2` as the first argument of `data.frame()`
+  data.frame(mesh |> # Pass `mesh` to `st_drop_geometry()`
+               st_drop_geometry() |> # Drop the geometry 
+               
+# Select from `mesh` the original slope and  null  simulated landscapes
+               select(Elevation,
+                      elevation_s1) |> # Pass  result to `pivot_longer()` 
+  
+               pivot_longer(cols = everything(),
+                            names_to = "VAR", 
+                            values_to = "ELEVATION") |> 
+  
+               select(ELEVATION)) # Drop VAR from the the dataframe
+
+dev.new(width=5, height=4)
+#Adding a geom and line (slope = 1)
+ggplot(data = mesh_e, aes(x = ELEVATION, y = ELEVATION_SMA, color = VAR)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(elevation = 1, intercept = 0, linetype = "dashed") +
+  
+  # Add a fitted line to the plots
+  geom_smooth(method = "lm", color='black') +
+  coord_equal() +
+  theme(aspect.ratio = 0.9, plot.title = element_text(size = 12), 
+        legend.position = "none") + 
+  facet_wrap(~ VAR, ncol = 2) +
+  
+ggtitle("Elevation Spatial Moving Average Scatterplots with Linear Regression Fit")
+```
+
+```{r}
+mesh_c <- mesh |> 
+  # `select()` keeps only the spatial moving averages and geometry
+  select(curvature.sma, 
+         curvature_s1.sma,
+         geometry) |> # passes selection to `pivot_longer()`
+  pivot_longer(cols = -geometry,
+               names_to = "VAR",
+               values_to = "CURVATURE_SMA")
+
+ggplot() + 
+  geom_sf(data = mesh_c, aes(fill = CURVATURE_SMA), color = NA) + 
+  facet_wrap(~VAR, ncol = 1) + # Creating multiple plots for single data 
+  scale_fill_distiller(palette = "YlOrRd", direction = 1) + # Select color 
+  labs(fill = "CURVATURE SMA") +
+  theme(axis.text.x = element_blank(), 
+        axis.text.y = element_blank()) # Remove the axis labels
+```
+
+```{r}
+mesh_c <- mesh_c |> # Pass `mesh2` as the first argument of `data.frame()`
+  data.frame(mesh |> # Pass `mesh` to `st_drop_geometry()`
+               st_drop_geometry() |> # Drop the geometry 
+               
+# Select from `mesh` the original slope and  null  simulated landscapes
+               select(Curvature,
+                      curvature_s1) |> # Pass  result to `pivot_longer()` 
+  
+               pivot_longer(cols = everything(),
+                            names_to = "VAR", 
+                            values_to = "CURVATURE") |> 
+  
+               select(CURVATURE)) # Drop VAR from the the dataframe
+
+dev.new(width=5, height=4)
+#Adding a geom and line (slope = 1)
+ggplot(data = mesh_c, aes(x = CURVATURE, y = CURVATURE_SMA, color = VAR)) +
+  geom_point(alpha = 0.3, size = 1) +
+  geom_abline(curvature = 1, intercept = 0, linetype = "dashed") +
+  
+  # Add a fitted line to the plots
+  geom_smooth(method = "lm", color='black') +
+  coord_equal() +
+  theme(aspect.ratio = 0.9, plot.title = element_text(size = 12), 
+        legend.position = "none") + 
+  facet_wrap(~ VAR, ncol = 2) +
+  
+ggtitle("Curvature Spatial Moving Average Scatterplots with Linear Regression Fit")
+```
+
+```{r}
+mapview(mesh, zcol = "Roughness", lwd = 0)
+```
+
+# **Global Moran’s** I
+
+The function [`moran.test()`](https://r-spatial.github.io/spdep/reference/moran.test.html) of the **spdep** package can be used to test spatial autocorrelation using Moran’s I𝐼. The arguments of [`moran.test()`](https://r-spatial.github.io/spdep/reference/moran.test.html) are a numeric vector with the data, a list with the spatial weights, and the type of hypothesis. The argument that denotes the hypothesis is called `alternative` and can be set equal to `greater` (default), `less` or `two.sided` to represent a different alternative hypothesis.
+
+```{r}
+# Global Moran's I
+gmoran <- moran.test(mesh$Roughness, mesh.wq, alternative = "greater")
+gmoran
+
+gmoran <- moran.test(mesh$Slope, mesh.wq, alternative = "greater")
+gmoran
+
+gmoran <- moran.test(mesh$Curvature, mesh.wq, alternative = "greater")
+gmoran
+
+gmoran <- moran.test(mesh$Elevation, mesh.wq, alternative = "greater")
+gmoran
+
+gmoran <- moran.test(mesh$Mine, mesh.wq, alternative = "greater")
+gmoran
+```
+
+```{r}
+moran.plot(mesh$Slope, listw=mesh.wq, 
+           xlab="Standardized Slope", 
+           ylab="Neighbors Standardized Slope",
+           main=c("Moran Scatterplot for Slope"),
+           pch = 0.1,
+           cex = 0.1,
+           labels = FALSE)
+```
+
+```{r}
+moran.plot(mesh$Elevation, listw=mesh.wq, 
+           xlab="Standardized Elevation", 
+           ylab="Neighbors Standardized Elevation",
+           main=c("Moran Scatterplot for Elevation"),
+           pch = 0.1,
+           cex = 0.1,
+           labels = FALSE)
+```
+
+```{r}
+moran.plot(mesh$Curvature, listw=mesh.wq, 
+           xlab="Standardized Curvature", 
+           ylab="Neighbors Standardized Curvature",
+           main=c("Moran Scatterplot for Curvature"),
+           pch = 0.1,
+           cex = 0.1,
+           labels = FALSE)
+```
+
+```{r}
+moran.plot(mesh$Roughness, listw=mesh.wq, 
+           xlab="Standardized Roughness", 
+           ylab="Neighbors Standardized Roughness",
+           main=c("Moran Scatterplot for Roughness"),
+           pch = 0.1,
+           cex = 0.1,
+           labels = FALSE)
+```
+
+## **Local Moran’s** 𝐼
+
+Seen that the Global Moran’s 𝐼 provides an index to assess the spatial autocorrelation for the whole study region. There is often interest in providing a local measure of similarity between each area’s value and those of nearby areas. Local Indicators of Spatial Association (LISA) ([Anselin 1995](https://www.paulamoraga.com/book-spatial/references.html#ref-anselin95)) are designed to provide an indication of the extent of significant spatial clustering of similar values around each observation. A desirable property is that the sum of the LISA’s values across all regions is equal to a multiple of the global indicator of spatial association. As a result, global statistics may be decomposed into a set of local statistics and most LISAs are defined as local versions of well-known global indexes.
+
+The [`localmoran()`](https://r-spatial.github.io/spdep/reference/localmoran.html) function of the **spdep** package can be used to compute the Local Moran’s I𝐼 for a given dataset. The arguments of [`localmoran()`](https://r-spatial.github.io/spdep/reference/localmoran.html) include a numeric vector with the values of the variable, a list with the neighbor weights, and the name of an alternative hypothesis that can be set equal to `greater` (default), `less` or `two.sided`.
+
+We create maps with **tmap** ([Tennekes 2022](https://www.paulamoraga.com/book-spatial/references.html#ref-R-tmap)) showing the housing prices, the local Moran’s I𝐼, z-scores, and p-values. Areas with p-value less than the significance level 0.05 (or with z-scores higher than `qnorm(0.95)` = 1.65) correspond to areas for which we would reject the null hypothesis and conclude they present positive spatial autocorrelation.
+
+# Regression Analysis
+
+## Identifying **multicollinearity**
+
+high correlation coefficients (close to 1 or -1) between pairs of predictor variables. High positive correlations indicate that the variables move together in the same direction, while high negative correlations indicate that the variables move in opposite directions. Both scenarios can indicate potential multicollinearity issues.
+
+```{r}
+basics <- st_read("C:/CMF_Project/502ProjectData/Grid_120m_Hogback_att.shp")
+cor.table <- basics %>%
+  dplyr::select(-Id) %>%
+  st_drop_geometry() %>%
+  correlate()
+
+cor.table
+```
+
+High coefficient between slope and roughness indicates multicollinerarity. Drop roughness from regression model
+
+## Non-spatial Regressions
+
+Regression analysis is implemented in `R` by means of the `lm` function. The arguments of the model include an object of type “formula” and a data frame. Other arguments include conditions for sub-setting the data, using sampling weights, and so on.
+
+```{r}
+fit.ols.simple <- lm(Mine ~ Slope, data = mesh)
+summary(fit.ols.simple)
+```
+
+```{r}
+fit.ols.multiple <- lm(Mine ~ slope.sma + Elevation + Curvature + StructDen, data = mesh)
+options(scipen = 999, digits = 4) 
+
+summary(fit.ols.multiple)
+```
+
+```{r}
+fit.ols.multiple %>% as_flextable()
+```
+
+## **Spatial lag model**
+
+two standard types of spatial regression models: a spatial lag model, which models dependency in the outcome, and a spatial error model, which models dependency in the residuals. A spatial lag model (SLM) can be estimated in R using the command `lagsarlm()`, which is a part of the **spatialreg** package.
+
+simultaneous auto regression (SAR)
+
+```{r}
+fit.lag <- lagsarlm(Mine ~ Slope,  
+                  data = mesh, 
+                  listw = mesh.wq) 
+summary(fit.lag)
+```
+
+```{r}
+fit.lag <- lagsarlm(Mine ~ slope.sma + Elevation + Curvature + StructDen,  
+                  data = mesh, 
+                  listw = mesh.wq) 
+options(scipen = 999, digits = 4)
+summary(fit.lag)
+```

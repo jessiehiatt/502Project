@@ -7,8 +7,11 @@ Following code contains several methods for evaluating the spatial distribution 
 ```{r}
 library(sf)
 library(spatstat)
+```
+
+```{r}
 boundary <- st_read('C:/CMF_Project/502ProjectData/uinta_buff_1500ft.shp')
-shapefile <- st_read("C:/CMF_Project/502ProjectData/coal_mines_Uinta.shp")
+shapefile <- st_read("~/GitHub/502Project/Data/coal_mines_Uinta.shp")
 ```
 
 ## Plot Data
